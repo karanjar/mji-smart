@@ -1,1 +1,13 @@
-.env*
+# Sensitive files
+.env
+
+# Go binaries and dependencies
+go-engine/go-engine
+vendor/
+*.exe
+*.test
+
+# IDE and System files
+.idea/
+.vscode/
+.DS_Store
