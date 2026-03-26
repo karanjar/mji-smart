@@ -1,0 +1,279 @@
+version: '3.8'
+
+services:
+  # PostgreSQL with PostGIS
+  postgres:
+    image: postgis/postgis:15-3.4
+    container_name: mjismart-postgres
+    environment:
+      POSTGRES_DB: mjismart
+      POSTGRES_USER: mjismart
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-securepassword}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - mjismart-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mjismart"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis for caching and real-time
+  redis:
+    image: redis:7-alpine
+    container_name: mjismart-redis
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redispass}
+    volumes:
+      - redis_data:/data
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf
+    ports:
+      - "6379:6379"
+    networks:
+      - mjismart-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Go Engine
+  go-engine:
+    build:
+      context: ./go-engine
+      dockerfile: Dockerfile
+    container_name: mjismart-go-engine
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: mjismart
+      DB_PASSWORD: ${DB_PASSWORD:-securepassword}
+      DB_NAME: mjismart
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-redispass}
+      KAFKA_BROKERS: kafka:9092
+      PYTHON_AI_URL: http://python-ai:8000
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      PORT: 3000
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - mjismart-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+
+  # Python AI Service
+  python-ai:
+    build:
+      context: ./python-ai
+      dockerfile: Dockerfile
+    container_name: mjismart-python-ai
+    environment:
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redispass}@redis:6379/0
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      MODEL_PATH: /app/models/infrastructure_model.pt
+      DEVICE: cpu
+      CONFIDENCE_THRESHOLD: 0.6
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      WORKERS: 4
+    volumes:
+      - ./python-ai/models:/app/models
+      - ./python-ai/data:/app/data
+    ports:
+      - "8000:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - mjismart-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 4G
+          # Uncomment if GPU available
+          # reservations:
+          #   devices:
+          #     - driver: nvidia
+          #       count: 1
+          #       capabilities: [gpu]
+
+  # Kafka for message queuing
+  kafka:
+    image: confluentinc/cp-kafka:latest
+    container_name: mjismart-kafka
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    ports:
+      - "9092:9092"
+    depends_on:
+      - zookeeper
+    networks:
+      - mjismart-network
+
+  # Zookeeper for Kafka
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+    container_name: mjismart-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    networks:
+      - mjismart-network
+
+  # Nginx for load balancing and static files
+  nginx:
+    image: nginx:alpine
+    container_name: mjismart-nginx
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./static:/usr/share/nginx/html
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - go-engine
+      - python-ai
+    networks:
+      - mjismart-network
+    restart: unless-stopped
+
+  # Prometheus for monitoring
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: mjismart-prometheus
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    ports:
+      - "9090:9090"
+    networks:
+      - mjismart-network
+    restart: unless-stopped
+
+  # Grafana for visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: mjismart-grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_INSTALL_PLUGINS: grafana-piechart-panel
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana:/etc/grafana/provisioning
+    ports:
+      - "3001:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - mjismart-network
+    restart: unless-stopped
+
+  # Elasticsearch for logs
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: mjismart-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+    networks:
+      - mjismart-network
+    restart: unless-stopped
+
+  # Logstash for log aggregation
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.11.0
+    container_name: mjismart-logstash
+    volumes:
+      - ./monitoring/logstash.conf:/usr/share/logstash/pipeline/logstash.conf
+    ports:
+      - "5000:5000"
+    depends_on:
+      - elasticsearch
+    networks:
+      - mjismart-network
+    restart: unless-stopped
+
+  # Kibana for log visualization
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.11.0
+    container_name: mjismart-kibana
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+    ports:
+      - "5601:5601"
+    depends_on:
+      - elasticsearch
+    networks:
+      - mjismart-network
+    restart: unless-stopped
+
+  # MinIO for local S3-compatible storage (for development)
+  minio:
+    image: minio/minio:latest
+    container_name: mjismart-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_PASSWORD:-minioadmin}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    networks:
+      - mjismart-network
+    restart: unless-stopped
+
+  # Redis Commander for Redis UI (development)
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: mjismart-redis-commander
+    environment:
+      REDIS_HOSTS: redis:6379:0:${REDIS_PASSWORD:-redispass}
+    ports:
+      - "8081:8081"
+    depends_on:
+      - redis
+    networks:
+      - mjismart-network
+    restart: unless-stopped
+
+networks:
+  mjismart-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:
+  elasticsearch_data:
+  minio_data:
