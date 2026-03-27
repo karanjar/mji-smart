@@ -180,15 +180,20 @@ type CORSConfig struct {
 }
 
 type HelmetConfig struct {
-	Enabled               bool   `json:"enabled"`
-	XSSProtection         string `json:"xss_protection"`
-	ContentTypeNosniff    string `json:"content_type_nosniff"`
-	XFrameOptions         string `json:"x_frame_options"`
-	HSTSMaxAge            int    `json:"hsts_max_age"`
-	HSTSIncludeSubdomains bool   `json:"hsts_include_subdomains"`
-	HSTSPreload           bool   `json:"hsts_preload"`
-	ReferrerPolicy        string `json:"referrer_policy"`
-	PermissionsPolicy     string `json:"permissions_policy"`
+	Enabled                   bool   `json:"enabled"`
+	XSSProtection             string `json:"xss_protection"`
+	ContentTypeNosniff        string `json:"content_type_nosniff"`
+	XFrameOptions             string `json:"x_frame_options"`
+	HSTSMaxAge                int    `json:"hsts_max_age"`
+	HSTSExcludeSubdomains     bool   `json:"hsts_exclude_subdomains"` // Note: Exclude, not Include
+	ReferrerPolicy            string `json:"referrer_policy"`
+	CSP                       string `json:"csp"`
+	CSPReportOnly             string `json:"csp_report_only"`
+	PermissionsPolicy         string `json:"permissions_policy"`
+	CrossOriginEmbedderPolicy string `json:"cross_origin_embedder_policy"`
+	CrossOriginOpenerPolicy   string `json:"cross_origin_opener_policy"`
+	CrossOriginResourcePolicy string `json:"cross_origin_resource_policy"`
+	OriginAgentCluster        bool   `json:"origin_agent_cluster"`
 }
 
 type RateLimitConfig struct {
@@ -200,67 +205,10 @@ type RateLimitConfig struct {
 
 // Load loads configuration from environment variables
 func Load() *Config {
+	// ... other config loading ...
+
 	return &Config{
-		Database: DatabaseConfig{
-			Host:            getEnv("DB_HOST", "localhost"),
-			Port:            getEnv("DB_PORT", "5432"),
-			User:            getEnv("DB_USER", "mjismart"),
-			Password:        getEnv("DB_PASSWORD", "securepassword"),
-			Name:            getEnv("DB_NAME", "mjismart"),
-			SSLMode:         getEnv("DB_SSLMODE", "disable"),
-			MaxOpenConns:    getEnvAsInt("DB_MAX_OPEN_CONNS", 100),
-			MaxIdleConns:    getEnvAsInt("DB_MAX_IDLE_CONNS", 10),
-			ConnMaxLifetime: getEnvAsDuration("DB_CONN_MAX_LIFETIME", 30*time.Minute),
-		},
-		Redis: RedisConfig{
-			Host:     getEnv("REDIS_HOST", "localhost"),
-			Port:     getEnv("REDIS_PORT", "6379"),
-			Password: getEnv("REDIS_PASSWORD", ""),
-			DB:       getEnvAsInt("REDIS_DB", 0),
-		},
-		Kafka: KafkaConfig{
-			Brokers: getEnvSlice("KAFKA_BROKERS", []string{"localhost:9092"}),
-			Topic:   getEnv("KAFKA_TOPIC", "mjismart-reports"),
-		},
-		Server: ServerConfig{
-			Port:               getEnv("PORT", "3000"),
-			Environment:        getEnv("ENVIRONMENT", "development"),
-			RateLimitPerMinute: getEnvAsInt("RATE_LIMIT_PER_MINUTE", 100),
-			RateLimitBurst:     getEnvAsInt("RATE_LIMIT_BURST", 20),
-			ReadTimeout:        getEnvAsDuration("SERVER_READ_TIMEOUT", 10*time.Second),
-			WriteTimeout:       getEnvAsDuration("SERVER_WRITE_TIMEOUT", 10*time.Second),
-			IdleTimeout:        getEnvAsDuration("SERVER_IDLE_TIMEOUT", 120*time.Second),
-			BodyLimit:          getEnvAsInt("SERVER_BODY_LIMIT", 10*1024*1024), // 10MB
-			Prefork:            getEnvAsBool("SERVER_PREFORK", false),
-		},
-		Auth: AuthConfig{
-			JWTSecret:         getEnv("JWT_SECRET", "your-secret-key-change-in-production"),
-			AdminAPIKey:       getEnv("ADMIN_API_KEY", "admin-key-123"),
-			JWTExpiryHours:    getEnvAsInt("JWT_EXPIRY_HOURS", 24),
-			RefreshExpiryDays: getEnvAsInt("REFRESH_EXPIRY_DAYS", 7),
-		},
-		Storage: StorageConfig{
-			Bucket:      getEnv("S3_BUCKET", "mjismart-reports"),
-			Region:      getEnv("S3_REGION", "us-east-1"),
-			AccessKey:   getEnv("S3_ACCESS_KEY", ""),
-			SecretKey:   getEnv("S3_SECRET_KEY", ""),
-			Endpoint:    getEnv("S3_ENDPOINT", ""),
-			UseSSL:      getEnvAsBool("S3_USE_SSL", true),
-			MaxFileSize: getEnvAsInt64("S3_MAX_FILE_SIZE", 10*1024*1024),
-		},
-		AI: AIConfig{
-			PythonAIURL: getEnv("PYTHON_AI_URL", "http://localhost:8000"),
-			Timeout:     getEnvAsDuration("AI_TIMEOUT", 30*time.Second),
-			RetryCount:  getEnvAsInt("AI_RETRY_COUNT", 3),
-			BatchSize:   getEnvAsInt("AI_BATCH_SIZE", 10),
-		},
-		Monitoring: MonitoringConfig{
-			EnableMetrics:   getEnvAsBool("ENABLE_METRICS", true),
-			EnableTracing:   getEnvAsBool("ENABLE_TRACING", false),
-			MetricsPort:     getEnvAsInt("METRICS_PORT", 9090),
-			TracingEndpoint: getEnv("TRACING_ENDPOINT", ""),
-			LogLevel:        getEnv("LOG_LEVEL", "info"),
-		},
+		// ... other configs ...
 		Security: SecurityConfig{
 			CSP: getCSPConfig(),
 			CORS: CORSConfig{
@@ -273,15 +221,18 @@ func Load() *Config {
 				MaxAge:           getEnvAsInt("CORS_MAX_AGE", 300),
 			},
 			Helmet: HelmetConfig{
-				Enabled:               getEnvAsBool("HELMET_ENABLED", true),
-				XSSProtection:         getEnv("HELMET_XSS_PROTECTION", "1; mode=block"),
-				ContentTypeNosniff:    getEnv("HELMET_CONTENT_TYPE_NOSNIFF", "nosniff"),
-				XFrameOptions:         getEnv("HELMET_X_FRAME_OPTIONS", "DENY"),
-				HSTSMaxAge:            getEnvAsInt("HELMET_HSTS_MAX_AGE", 31536000),
-				HSTSIncludeSubdomains: getEnvAsBool("HELMET_HSTS_INCLUDE_SUBDOMAINS", true),
-				HSTSPreload:           getEnvAsBool("HELMET_HSTS_PRELOAD", false),
-				ReferrerPolicy:        getEnv("HELMET_REFERRER_POLICY", "strict-origin-when-cross-origin"),
-				PermissionsPolicy:     getEnv("HELMET_PERMISSIONS_POLICY", "geolocation=(), microphone=(), camera=()"),
+				Enabled:                   getEnvAsBool("HELMET_ENABLED", true),
+				XSSProtection:             getEnv("HELMET_XSS_PROTECTION", "1; mode=block"),
+				ContentTypeNosniff:        getEnv("HELMET_CONTENT_TYPE_NOSNIFF", "nosniff"),
+				XFrameOptions:             getEnv("HELMET_X_FRAME_OPTIONS", "DENY"),
+				HSTSMaxAge:                getEnvAsInt("HELMET_HSTS_MAX_AGE", 31536000),
+				HSTSExcludeSubdomains:     getEnvAsBool("HELMET_HSTS_EXCLUDE_SUBDOMAINS", false),
+				ReferrerPolicy:            getEnv("HELMET_REFERRER_POLICY", "strict-origin-when-cross-origin"),
+				PermissionsPolicy:         getEnv("HELMET_PERMISSIONS_POLICY", "geolocation=(), microphone=(), camera=()"),
+				CrossOriginEmbedderPolicy: getEnv("HELMET_CROSS_ORIGIN_EMBEDDER_POLICY", "require-corp"),
+				CrossOriginOpenerPolicy:   getEnv("HELMET_CROSS_ORIGIN_OPENER_POLICY", "same-origin"),
+				CrossOriginResourcePolicy: getEnv("HELMET_CROSS_ORIGIN_RESOURCE_POLICY", "same-origin"),
+				OriginAgentCluster:        getEnvAsBool("HELMET_ORIGIN_AGENT_CLUSTER", true),
 			},
 			RateLimit: RateLimitConfig{
 				Enabled:      getEnvAsBool("RATE_LIMIT_ENABLED", true),

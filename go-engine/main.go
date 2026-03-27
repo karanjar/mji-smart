@@ -188,6 +188,7 @@ func initCache(redisClient *redis.Client, serverCfg *config.ServerConfig, logger
 
 // setupMiddleware configures all middleware for the Fiber app
 // main.go - Updated setupMiddleware function
+// main.go - Corrected setupMiddleware function
 func setupMiddleware(app *fiber.App, cfg *config.Config, redisClient *redis.Client, sugar *zap.SugaredLogger) {
 	// Recovery middleware (must be first)
 	app.Use(recover.New(recover.Config{
@@ -223,16 +224,20 @@ func setupMiddleware(app *fiber.App, cfg *config.Config, redisClient *redis.Clie
 		sugar.Info("CORS middleware configured")
 	}
 
-	// Helmet middleware for security headers (with config)
+	// Helmet middleware for security headers (with correct config)
 	if cfg.Security.Helmet.Enabled {
 		helmetConfig := helmet.Config{
-			XSSProtection:         cfg.Security.Helmet.XSSProtection,
-			ContentTypeNosniff:    cfg.Security.Helmet.ContentTypeNosniff,
-			XFrameOptions:         cfg.Security.Helmet.XFrameOptions,
-			HSTSMaxAge:            cfg.Security.Helmet.HSTSMaxAge,
-			HSTSIncludeSubdomains: cfg.Security.Helmet.HSTSIncludeSubdomains,
-			HSTSPreload:           cfg.Security.Helmet.HSTSPreload,
-			ReferrerPolicy:        cfg.Security.Helmet.ReferrerPolicy,
+			XSSProtection:             cfg.Security.Helmet.XSSProtection,
+			ContentTypeNosniff:        cfg.Security.Helmet.ContentTypeNosniff,
+			XFrameOptions:             cfg.Security.Helmet.XFrameOptions,
+			HSTSMaxAge:                cfg.Security.Helmet.HSTSMaxAge,
+			HSTSExcludeSubdomains:     cfg.Security.Helmet.HSTSExcludeSubdomains,
+			ReferrerPolicy:            cfg.Security.Helmet.ReferrerPolicy,
+			PermissionsPolicy:         cfg.Security.Helmet.PermissionsPolicy,
+			CrossOriginEmbedderPolicy: cfg.Security.Helmet.CrossOriginEmbedderPolicy,
+			CrossOriginOpenerPolicy:   cfg.Security.Helmet.CrossOriginOpenerPolicy,
+			CrossOriginResourcePolicy: cfg.Security.Helmet.CrossOriginResourcePolicy,
+			OriginAgentCluster:        cfg.Security.Helmet.OriginAgentCluster,
 		}
 
 		// Add CSP if enabled
@@ -246,11 +251,6 @@ func setupMiddleware(app *fiber.App, cfg *config.Config, redisClient *redis.Clie
 				}
 				sugar.Infof("CSP policy configured: %s", cspPolicy)
 			}
-		}
-
-		// Add Permissions Policy
-		if cfg.Security.Helmet.PermissionsPolicy != "" {
-			helmetConfig.PermissionsPolicy = cfg.Security.Helmet.PermissionsPolicy
 		}
 
 		app.Use(helmet.New(helmetConfig))
